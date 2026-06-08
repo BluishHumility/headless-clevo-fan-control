@@ -12,8 +12,17 @@ package manager available for your Linux distribution.
 
 - GCC
 - CMake
-- AppIndicator3
+- AppIndicator3 or Ayatana AppIndicator3
 - GTK+3
+
+On Debian/Ubuntu systems that ship Ayatana AppIndicator, install:
+
+```shell
+sudo apt install build-essential cmake pkg-config libgtk-3-dev libayatana-appindicator3-dev
+```
+
+On systems that still ship the legacy AppIndicator package, install the
+corresponding `libappindicator3-dev` package instead.
 
 ## Build and Install
 

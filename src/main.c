@@ -45,7 +45,18 @@
 #include <unistd.h>
 #include <time.h>
 
+#ifdef USE_AYATANA_APPINDICATOR
+#include <libayatana-appindicator/app-indicator.h>
+/*
+ * Ayatana AppIndicator has used both IS_APP_INDICATOR and
+ * APP_IS_INDICATOR across releases. Keep the existing source call portable.
+ */
+#ifndef IS_APP_INDICATOR
+#define IS_APP_INDICATOR APP_IS_INDICATOR
+#endif
+#else
 #include <libappindicator/app-indicator.h>
+#endif
 
 #define NAME "clevo-indicator"
 
