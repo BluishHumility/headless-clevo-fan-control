@@ -147,22 +147,41 @@ static int auto_fan(void) {
 
     int last = MAX(MIN_FAN_DUTY, state.auto_duty_val);
 
-    int now = millis();
+    int64_t now = millis();
     if (now - state.last_update_ms < 300)
         return last;
 
     state.last_update_ms = now;
 
-    int max_duty = 40;
+    int target;
 
-    int target =
-        (temp < 60)
-            ? MIN_FAN_DUTY
-            : CLAMP((temp - 60), MIN_FAN_DUTY, max_duty);
+    if (temp < 40) {
+        target = 10;
+    } else if (temp < 50) {
+        target = 10;
+    } else if (temp < 60) {
+        target = 15;
+    } else if (temp < 70) {
+        target = 20;
+    } else if (temp < 75) {
+        target = 30;
+    } else if (temp < 80) {
+        target = 45;
+    } else if (temp < 85) {
+        target = 60;
+    } else if (temp < 90) {
+        target = 75;
+    } else if (temp < 95) {
+        target = 90;
+    } else {
+        target = 100;
+    }
 
-    int next = last + CLAMP(target - last, -1, 1);
+    // smooth changes to avoid oscillation/noise spikes
+    int step = target - last;
+    step = CLAMP(step, -2, 2);
 
-    return next;
+    return last + step;
 }
 
 /* ---------------- modes ---------------- */
