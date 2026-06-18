@@ -1,0 +1,25 @@
+[Unit]
+Description=Clevo Fan Control Daemon
+After=multi-user.target
+ConditionPathExists=/usr/local/bin/clevo-fan-control
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/clevo-fan-control
+Restart=always
+RestartSec=2
+
+# Required for EC / ioperm access
+CapabilityBoundingSet=CAP_SYS_RAWIO
+AmbientCapabilities=CAP_SYS_RAWIO
+NoNewPrivileges=true
+
+# Run as root (required for ioperm + EC access)
+User=root
+
+# Logging goes to journalctl
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

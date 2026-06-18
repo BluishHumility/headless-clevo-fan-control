@@ -11,7 +11,8 @@ find_package(PkgConfig REQUIRED)
 # Link only math library (still needed for round(), etc.)
 target_link_libraries(clevo-fan-control m)
 
-install(
-        TARGETS clevo-fan-control
-        DESTINATION bin
-)
+install(TARGETS clevo-fan-control
+        RUNTIME DESTINATION bin)
+
+install(FILES ${CMAKE_SOURCE_DIR}/clevo-fan-control.service
+        DESTINATION /etc/systemd/system)

@@ -52,6 +52,7 @@ typedef struct {
 } state_t;
 
 static state_t state;
+static int last_temp_band = -1;
 
 /* ---------------- timing ---------------- */
 
@@ -117,6 +118,21 @@ static int calc_rpm(int hi, int lo) {
     return v ? (2156220 / v) : 0;
 }
 
+/* ---------------- band helper ---------------- */
+
+static int temp_band(int t) {
+    if (t < 40) return 0;
+    if (t < 50) return 1;
+    if (t < 60) return 2;
+    if (t < 70) return 3;
+    if (t < 75) return 4;
+    if (t < 80) return 5;
+    if (t < 85) return 6;
+    if (t < 90) return 7;
+    if (t < 95) return 8;
+    return 9;
+}
+
 /* ---------------- EC init ---------------- */
 
 static int ec_init(void) {
@@ -156,7 +172,7 @@ static int auto_fan(void) {
     int target;
 
     if (temp < 40) {
-        target = 10;
+        target = 5;
     } else if (temp < 50) {
         target = 10;
     } else if (temp < 60) {
@@ -176,6 +192,14 @@ static int auto_fan(void) {
     } else {
         target = 100;
     }
+
+int band = temp_band(temp);
+
+if (band != last_temp_band) {
+    last_temp_band = band;
+    printf("TEMP BAND CHANGE: %d°C → band %d | TARGET=%d%% | FAN=%d%%\n",
+           temp, band, target, current);
+}
 
     // smooth changes to avoid oscillation/noise spikes
     int step = target - last;
