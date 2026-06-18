@@ -196,9 +196,12 @@ static int auto_fan(void) {
 int band = temp_band(temp);
 
 if (band != last_temp_band) {
-    last_temp_band = band;
+    int current = state.auto_duty_val;
+
     printf("TEMP BAND CHANGE: %d°C → band %d | TARGET=%d%% | FAN=%d%%\n",
            temp, band, target, current);
+
+    last_temp_band = band;
 }
 
     // smooth changes to avoid oscillation/noise spikes
