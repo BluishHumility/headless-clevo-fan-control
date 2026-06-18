@@ -45,20 +45,9 @@
 #include <unistd.h>
 #include <time.h>
 
-#ifdef USE_AYATANA_APPINDICATOR
-#include <libayatana-appindicator/app-indicator.h>
-/*
- * Ayatana AppIndicator has used both IS_APP_INDICATOR and
- * APP_IS_INDICATOR across releases. Keep the existing source call portable.
- */
-#ifndef IS_APP_INDICATOR
-#define IS_APP_INDICATOR APP_IS_INDICATOR
-#endif
-#else
-#include <libappindicator/app-indicator.h>
-#endif
 
-#define NAME "clevo-indicator"
+
+#define NAME "clevo-fan-control"
 
 #define EC_SC 0x66
 #define EC_DATA 0x62
@@ -83,31 +72,14 @@
 #define MAX_FAN_RPM 4400.0
 #define MIN_FAN_DUTY 16
 
-typedef enum {
-    NA = 0, AUTO = 1, MANUAL = 2
-} MenuItemType;
 
 static void main_init_share(void);
 
 static int main_ec_worker(void);
 
-static void main_ui_worker(int argc, char **argv);
-
-static void main_on_sigchld(int signum);
-
-static void main_on_sigterm(int signum);
-
 static int main_dump_fan(void);
 
 static int main_test_fan(int duty_percentage);
-
-static gboolean ui_update(gpointer user_data);
-
-static void ui_command_set_fan(long fan_duty);
-
-static void ui_command_quit(gchar *command);
-
-static void ui_toggle_menuitems(int fan_duty);
 
 static void ec_on_sigterm(int signum);
 
@@ -147,8 +119,6 @@ static int64_t millis();
 
 static float get_point_along_line(float x0, float y0, float x1, float y1, float xp);
 
-static AppIndicator *indicator = NULL;
-
 struct {
     char label[256];
     GCallback callback;
@@ -156,32 +126,7 @@ struct {
     MenuItemType type;
     GtkWidget *widget;
 
-} static menuitems[] = {
-        {"Set FAN to AUTO", G_CALLBACK(ui_command_set_fan), -1,  AUTO,   NULL},
-        {"",                NULL,                           0L,  NA,     NULL},
-        {"Set FAN to  0%",  G_CALLBACK(ui_command_set_fan), 0,   MANUAL, NULL},
-        {"Set FAN to  10%", G_CALLBACK(ui_command_set_fan), 10,  MANUAL, NULL},
-        {"Set FAN to  15%", G_CALLBACK(ui_command_set_fan), 15,  MANUAL, NULL},
-        {"Set FAN to  16%", G_CALLBACK(ui_command_set_fan), 16,  MANUAL, NULL},
-        {"Set FAN to  17%", G_CALLBACK(ui_command_set_fan), 17,  MANUAL, NULL},
-        {"Set FAN to  18%", G_CALLBACK(ui_command_set_fan), 18,  MANUAL, NULL},
-        {"Set FAN to  19%", G_CALLBACK(ui_command_set_fan), 19,  MANUAL, NULL},
-        {"Set FAN to  20%", G_CALLBACK(ui_command_set_fan), 20,  MANUAL, NULL},
-        {"Set FAN to  30%", G_CALLBACK(ui_command_set_fan), 30,  MANUAL, NULL},
-        {"Set FAN to  40%", G_CALLBACK(ui_command_set_fan), 40,  MANUAL, NULL},
-        {"Set FAN to  50%", G_CALLBACK(ui_command_set_fan), 50,  MANUAL, NULL},
-        {"Set FAN to  60%", G_CALLBACK(ui_command_set_fan), 60,  MANUAL, NULL},
-        {"Set FAN to  70%", G_CALLBACK(ui_command_set_fan), 70,  MANUAL, NULL},
-        {"Set FAN to  80%", G_CALLBACK(ui_command_set_fan), 80,  MANUAL, NULL},
-        {"Set FAN to  90%", G_CALLBACK(ui_command_set_fan), 90,  MANUAL, NULL},
-        {"Set FAN to 100%", G_CALLBACK(ui_command_set_fan), 100, MANUAL, NULL},
-        {"",                NULL,                           0L,  NA,     NULL},
-        {"Quit",            G_CALLBACK(ui_command_quit),    0L,  NA,     NULL}
-};
-
-static int menuitem_count = (sizeof(menuitems) / sizeof(menuitems[0]));
-
-struct {
+static struct {
     volatile int exit;
     volatile int cpu_temp;
     volatile int gpu_temp;
@@ -194,139 +139,75 @@ struct {
     volatile int64_t last_update_time_ms;
     volatile int last_speed_change_delta;
     volatile int64_t last_speed_change_direction_time_ms;
-} static *share_info = NULL;
+} state;
 
 static pid_t parent_pid = 0;
 
-int main(int argc, char *argv[]) {
-    printf("Simple fan control utility for Clevo laptops\n");
+int main(int argc, char *argv[])
+{
+    printf("Clevo Fan Control (headless)\n");
 
+    // Optional: kill switch
     if (argc > 1 && strcmp(argv[1], "exit") == 0) {
-        printf("Killing all...\n");
+        printf("Killing all instances...\n");
         char killCommand[256];
-        sprintf(killCommand, "pkill -f %s", NAME);
-        int desktop_uid = getuid();
-        setuid(desktop_uid);
+        snprintf(killCommand, sizeof(killCommand),
+                 "pkill -f %s", NAME);
         system(killCommand);
         return EXIT_SUCCESS;
     }
-    if (check_proc_instances(NAME) > 1) {
-        printf("Multiple running instances!\n");
-        char *display = getenv("DISPLAY");
-        if (display != NULL && strlen(display) > 0) {
-            int desktop_uid = getuid();
-            setuid(desktop_uid);
-            //
-            gtk_init(&argc, &argv);
-            GtkWidget *dialog = gtk_message_dialog_new(NULL, 0,
-                                                       GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                                                       "Multiple running instances of %s!", NAME);
-            gtk_dialog_run(GTK_DIALOG(dialog));
-            gtk_widget_destroy(dialog);
-        }
-        return EXIT_FAILURE;
-    }
-    if (ec_init() != EXIT_SUCCESS) {
-        printf("ecinit\n");
-        printf("unable to control EC: %s\n", strerror(errno));
-        return EXIT_FAILURE;
-    }
-if (display == NULL || strlen(display) == 0) {
-            printf("Starting headless automatic fan control\n");
-        
-            parent_pid = getpid();
-        
-            main_init_share();
-        
-            signal_term(&ec_on_sigterm);
-        
-            return main_ec_worker();
-        } else {
 
-            parent_pid = getpid();
-            main_init_share();
-            signal(SIGCHLD, &main_on_sigchld);
-            signal_term(&main_on_sigterm);
-            pid_t worker_pid = fork();
-            if (worker_pid == 0) {
-                signal(SIGCHLD, SIG_DFL);
-                signal_term(&ec_on_sigterm);
-                return main_ec_worker();
-            } else if (worker_pid > 0) {
-                main_ui_worker(argc, argv);
-                share_info->exit = 1;
-                waitpid(worker_pid, NULL, 0);
-            } else {
-                printf("unable to create worker: %s\n", strerror(errno));
-                return EXIT_FAILURE;
-            }
-        }
-    } else {
+    // Optional: manual override mode (debug tool)
+    if (argc > 1) {
         if (argv[1][0] == '-') {
-            printf("argv10\n");
             printf(
-                    "\n\
-Usage: clevo-indicator [fan-duty-percentage]\n\
-\n\
-Dump/Control fan duty on Clevo laptops. Display indicator by default.\n\
-\n\
-Arguments:\n\
-  [fan-duty-percentage]\t\tTarget fan duty in percentage, from 0 to 100\n\
-  -?\t\t\t\tDisplay this help and exit\n\
-\n\
-Without arguments this program should attempt to display an indicator in\n\
-the Ubuntu tray area for fan information display and control. The indicator\n\
-requires this program to have setuid=root flag but run from the desktop user\n\
-, because a root user is not allowed to display a desktop indicator while a\n\
-non-root user is not allowed to control Clevo EC (Embedded Controller that's\n\
-responsible of the fan). Fix permissions of this executable if it fails to\n\
-run:\n\
-    sudo chown root clevo-indicator\n\
-    sudo chmod u+s  clevo-indicator\n\
-\n\
-Note any fan duty change should take 1-2 seconds to come into effect - you\n\
-can verify by the fan speed displayed on indicator icon and also louder fan\n\
-noise.\n\
-\n\
-In the indicator mode, this program would always attempt to load kernel\n\
-module 'ec_sys', in order to query EC information from\n\
-'/sys/kernel/debug/ec/ec0/io' instead of polling EC ports for readings,\n\
-which may be more risky if interrupted or concurrently operated during the\n\
-process.\n\
-\n\
-DO NOT MANIPULATE OR QUERY EC I/O PORTS WHILE THIS PROGRAM IS RUNNING.\n\
-\n");
+                "Usage:\n"
+                "  clevo-fan-control        (automatic daemon)\n"
+                "  clevo-fan-control <0-100> (manual fan duty)\n"
+                "  clevo-fan-control exit    (stop all instances)\n"
+            );
             return main_dump_fan();
-        } else {
-            printf("ATOI\n");
-
-            int val = atoi(argv[1]);
-            if (val < 0 || val > 100) {
-                printf("invalid fan duty %d!\n", val);
-                return EXIT_FAILURE;
-            }
-            return main_test_fan(val);
         }
+
+        int val = atoi(argv[1]);
+        if (val < 0 || val > 100) {
+            printf("invalid fan duty %d\n", val);
+            return EXIT_FAILURE;
+        }
+
+        return main_test_fan(val);
     }
-    return EXIT_SUCCESS;
+
+    // Init EC access
+    if (ec_init() != EXIT_SUCCESS) {
+        fprintf(stderr, "ec_init failed: %s\n", strerror(errno));
+        return EXIT_FAILURE;
+    }
+
+    // No GUI, no fork, no DISPLAY checks, no shared memory
+    signal_term(ec_on_sigterm);
+
+    printf("Starting automatic fan control loop...\n");
+
+    return main_ec_worker();
 }
 
 static void main_init_share(void) {
     void *shm = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED,
                      -1, 0);
     share_info = shm;
-    share_info->exit = 0;
-    share_info->cpu_temp = 0;
-    share_info->gpu_temp = 0;
-    share_info->fan_duty = -1;
-    share_info->fan_rpms = 0;
-    share_info->auto_duty = 1;
-    share_info->auto_duty_val = -1;
-    share_info->manual_next_fan_duty = 0;
-    share_info->manual_prev_fan_duty = 0;
-    share_info->last_update_time_ms = millis();
-    share_info->last_speed_change_delta = 0;
-    share_info->last_speed_change_direction_time_ms = 0;
+    state.exit = 0;
+    state.cpu_temp = 0;
+    state.gpu_temp = 0;
+    state.fan_duty = -1;
+    state.fan_rpms = 0;
+    state.auto_duty = 1;
+    state.auto_duty_val = -1;
+    state.manual_next_fan_duty = 0;
+    state.manual_prev_fan_duty = 0;
+    state.last_update_time_ms = millis();
+    state.last_speed_change_delta = 0;
+    state.last_speed_change_direction_time_ms = 0;
 }
 
 static int main_ec_worker(void) {
@@ -350,17 +231,17 @@ static int main_ec_worker(void) {
         }
     }
 
-    while (share_info->exit == 0) {
+    while (state.exit == 0) {
         // check parent
         if (parent_pid != 0 && kill(parent_pid, 0) == -1) {
             printf("worker on parent death\n");
             break;
         }
         // write EC
-        int new_fan_duty = share_info->manual_next_fan_duty;
-        if (new_fan_duty != share_info->manual_prev_fan_duty) {
+        int new_fan_duty = state.manual_next_fan_duty;
+        if (new_fan_duty != state.manual_prev_fan_duty) {
             ec_write_fan_duty(new_fan_duty);
-            share_info->manual_prev_fan_duty = new_fan_duty;
+            state.manual_prev_fan_duty = new_fan_duty;
         }
         // read EC
         int io_fd = open(ec_path, O_RDONLY, 0);
@@ -375,14 +256,14 @@ static int main_ec_worker(void) {
                 printf("unable to read EC from sysfs: %s\n", strerror(errno));
                 break;
             case 0x100:
-                share_info->cpu_temp = buf[EC_REG_CPU_TEMP];
-                share_info->gpu_temp = buf[EC_REG_GPU_TEMP];
-                share_info->fan_duty = calculate_fan_duty(buf[EC_REG_FAN_DUTY]);
-                share_info->fan_rpms = calculate_fan_rpms(buf[EC_REG_FAN_RPMS_HI],
+                state.cpu_temp = buf[EC_REG_CPU_TEMP];
+                state.gpu_temp = buf[EC_REG_GPU_TEMP];
+                state.fan_duty = calculate_fan_duty(buf[EC_REG_FAN_DUTY]);
+                state.fan_rpms = calculate_fan_rpms(buf[EC_REG_FAN_RPMS_HI],
                                                           buf[EC_REG_FAN_RPMS_LO]);
                 /*
-                 printf("temp=%d, duty=%d, rpms=%d\n", share_info->cpu_temp,
-                 share_info->fan_duty, share_info->fan_rpms);
+                 printf("temp=%d, duty=%d, rpms=%d\n", state.cpu_temp,
+                 state.fan_duty, state.fan_rpms);
                  */
                 break;
             default:
@@ -390,15 +271,15 @@ static int main_ec_worker(void) {
         }
         close(io_fd);
         // auto EC
-        if (share_info->auto_duty == 1) {
+        if (state.auto_duty == 1) {
             int next_duty = ec_auto_duty_adjust();
-            if (next_duty != share_info->auto_duty_val) {
+            if (next_duty != state.auto_duty_val) {
 //                char s_time[256];
 //                get_time_string(s_time, 256, "%m/%d %H:%M:%S");
 //                printf("%s CPU=%d°C, GPU=%d°C, auto fan duty to %d%%\n", s_time,
-//                       share_info->cpu_temp, share_info->gpu_temp, next_duty);
+//                       state.cpu_temp, state.gpu_temp, next_duty);
                 ec_write_fan_duty(next_duty);
-                share_info->auto_duty_val = next_duty;
+                state.auto_duty_val = next_duty;
             }
         }
         //
@@ -406,54 +287,6 @@ static int main_ec_worker(void) {
     }
     printf("worker quit\n");
     return EXIT_SUCCESS;
-}
-
-static void main_ui_worker(int argc, char **argv) {
-    int desktop_uid = getuid();
-    setuid(desktop_uid);
-    //
-    gtk_init(&argc, &argv);
-    //
-    GtkWidget *indicator_menu = gtk_menu_new();
-    for (int i = 0; i < menuitem_count; i++) {
-        GtkWidget *item;
-        if (strlen(menuitems[i].label) == 0) {
-            item = gtk_separator_menu_item_new();
-        } else {
-            item = gtk_menu_item_new_with_label(menuitems[i].label);
-            g_signal_connect_swapped(item, "activate",
-                                     G_CALLBACK(menuitems[i].callback),
-                                     (void *) menuitems[i].option);
-        }
-        gtk_menu_shell_append(GTK_MENU_SHELL(indicator_menu), item);
-        menuitems[i].widget = item;
-    }
-    gtk_widget_show_all(indicator_menu);
-    //
-    indicator = app_indicator_new(NAME, "view-refresh",
-                                  APP_INDICATOR_CATEGORY_HARDWARE);
-    g_assert(IS_APP_INDICATOR(indicator));
-    app_indicator_set_label(indicator, "Init..", "XX");
-    app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ACTIVE);
-    app_indicator_set_ordering_index(indicator, -2);
-    app_indicator_set_title(indicator, "Clevo Fan Control");
-    app_indicator_set_menu(indicator, GTK_MENU(indicator_menu));
-    g_timeout_add(500, &ui_update, NULL);
-    ui_toggle_menuitems(share_info->auto_duty ? -1 : share_info->fan_duty);
-    gtk_main();
-    printf("main on UI quit\n");
-}
-
-static void main_on_sigchld(int signum) {
-    printf("main on worker quit signal\n");
-    exit(EXIT_SUCCESS);
-}
-
-static void main_on_sigterm(int signum) {
-    printf("main on signal: %s\n", strsignal(signum));
-    if (share_info != NULL)
-        share_info->exit = 1;
-    exit(EXIT_SUCCESS);
 }
 
 static int main_dump_fan(void) {
@@ -473,56 +306,6 @@ static int main_test_fan(int duty_percentage) {
     return EXIT_SUCCESS;
 }
 
-static gboolean ui_update(gpointer user_data) {
-    char label[256];
-    char icon_name[256];
-    double load = ((double) share_info->fan_rpms) / MAX_FAN_RPM * 100.0;
-    double load_r = round(load / 5.0) * 5.0;
-    sprintf(label, "Clevo Fan Control\n%d℃ %d℃\n%i RPM", share_info->cpu_temp,
-            share_info->gpu_temp, share_info->fan_rpms);
-    app_indicator_set_label(indicator, label, "XXXXXX");
-    app_indicator_set_title(indicator, label);
-    sprintf(icon_name, "brasero-disc-%02d", (int) load_r);
-//    app_indicator_set_icon(indicator, icon_name);
-
-    return G_SOURCE_CONTINUE;
-}
-
-static void ui_command_set_fan(long fan_duty) {
-    int fan_duty_val = (int) fan_duty;
-    if (fan_duty_val == -1) {
-        printf("clicked on fan duty auto\n");
-        share_info->auto_duty = 1;
-        share_info->auto_duty_val = MIN_FAN_DUTY;
-        share_info->manual_next_fan_duty = MIN_FAN_DUTY;
-    } else {
-        printf("clicked on fan duty: %d\n", fan_duty_val);
-        share_info->auto_duty = 0;
-        share_info->auto_duty_val = 0;
-        share_info->manual_next_fan_duty = fan_duty_val;
-    }
-    ui_toggle_menuitems(fan_duty_val);
-}
-
-static void ui_command_quit(gchar *command) {
-    printf("clicked on quit\n");
-    gtk_main_quit();
-}
-
-static void ui_toggle_menuitems(int fan_duty) {
-    for (int i = 0; i < menuitem_count; i++) {
-        if (menuitems[i].widget == NULL)
-            continue;
-        if (fan_duty == -1)
-            gtk_widget_set_sensitive(menuitems[i].widget,
-                                     menuitems[i].type != AUTO);
-        else
-            gtk_widget_set_sensitive(menuitems[i].widget,
-                                     menuitems[i].type != MANUAL
-                                     || (int) menuitems[i].option != fan_duty);
-    }
-}
-
 static int ec_init(void) {
     if (ioperm(EC_DATA, 1, 1) != 0)
         return EXIT_FAILURE;
@@ -534,23 +317,23 @@ static int ec_init(void) {
 static void ec_on_sigterm(int signum) {
     printf("ec on signal: %s\n", strsignal(signum));
     if (share_info != NULL)
-        share_info->exit = 1;
+        state.exit = 1;
 }
 
 static int ec_auto_duty_adjust(void) {
-    int temp = MAX(share_info->cpu_temp, share_info->gpu_temp);
-    int last_fan_duty = MAX(MIN_FAN_DUTY, share_info->auto_duty_val);
+    int temp = MAX(state.cpu_temp, state.gpu_temp);
+    int last_fan_duty = MAX(MIN_FAN_DUTY, state.auto_duty_val);
     int min_time_until_next_update_ms = 333;
 
     // Determine time difference since last update.
     int64_t now = millis();
-    int64_t diff_t = now - share_info->last_update_time_ms;
+    int64_t diff_t = now - state.last_update_time_ms;
 
     if (diff_t < min_time_until_next_update_ms) {
         return last_fan_duty;
     }
 
-    share_info->last_update_time_ms = now;
+    state.last_update_time_ms = now;
 
     // "Silent" profile
     int max_fan_duty = 40;
@@ -571,13 +354,13 @@ static int ec_auto_duty_adjust(void) {
     int fan_speed_change_delta = next_fan_duty - last_fan_duty;
 
     // If the speed changed in a different direction then updated the relevant variable.
-    if ((fan_speed_change_delta ^ share_info->last_speed_change_delta) < 0){
-        share_info->last_speed_change_delta = next_fan_duty - last_fan_duty;
-        share_info->last_speed_change_direction_time_ms = now;
+    if ((fan_speed_change_delta ^ state.last_speed_change_delta) < 0){
+        state.last_speed_change_delta = next_fan_duty - last_fan_duty;
+        state.last_speed_change_direction_time_ms = now;
     }
 
     // Determine time difference between last speed direction change.
-    int64_t diff_speed_direction_change_t = now - share_info->last_speed_change_direction_time_ms;
+    int64_t diff_speed_direction_change_t = now - state.last_speed_change_direction_time_ms;
     int min_time_until_next_direction_change_ms = 5000;
     if (diff_speed_direction_change_t < min_time_until_next_direction_change_ms) {
         return last_fan_duty;
