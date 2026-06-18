@@ -52,7 +52,9 @@ typedef struct {
 } state_t;
 
 static state_t state;
-static int last_logged_band = -1;
+
+static int last_temp_band = -1;      // stability logic
+static int last_logged_band = -1;    // logging only
 static int band_stable_count = 0;
 
 /* ---------------- timing ---------------- */
