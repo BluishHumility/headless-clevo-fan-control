@@ -231,10 +231,16 @@ int main(int argc, char *argv[]) {
         printf("unable to control EC: %s\n", strerror(errno));
         return EXIT_FAILURE;
     }
-    if (argc <= 1) {
-        char *display = getenv("DISPLAY");
-        if (display == NULL || strlen(display) == 0) {
-            return main_dump_fan();
+if (display == NULL || strlen(display) == 0) {
+            printf("Starting headless automatic fan control\n");
+        
+            parent_pid = getpid();
+        
+            main_init_share();
+        
+            signal_term(&ec_on_sigterm);
+        
+            return main_ec_worker();
         } else {
 
             parent_pid = getpid();
