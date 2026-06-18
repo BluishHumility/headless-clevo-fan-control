@@ -139,7 +139,6 @@ static int stable_temp_band(int temp) {
 
     // first run initialization
     if (last_temp_band == -1) {
-        last_temp_band = band;
         return band;
     }
 
@@ -229,6 +228,8 @@ if (band != last_temp_band) {
 
     printf("TEMP BAND CHANGE: %d°C → band %d | TARGET=%d%% | FAN=%d%%\n",
            temp, band, target, current);
+
+    last_temp_band = band;
 }
 
     // smooth changes to avoid oscillation/noise spikes
