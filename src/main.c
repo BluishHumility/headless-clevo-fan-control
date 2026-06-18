@@ -53,6 +53,7 @@ typedef struct {
 
 static state_t state;
 static int last_temp_band = -1;
+static int band_stable_count = 0;
 
 /* ---------------- timing ---------------- */
 
@@ -133,6 +134,34 @@ static int temp_band(int t) {
     return 9;
 }
 
+static int stable_temp_band(int temp) {
+    int band = temp_band(temp);
+
+    // first run initialization
+    if (last_temp_band == -1) {
+        last_temp_band = band;
+        return band;
+    }
+
+    // if same band, reset stability counter
+    if (band == last_temp_band) {
+        band_stable_count = 0;
+        return band;
+    }
+
+    // if different band, require stability before switching
+    band_stable_count++;
+
+    if (band_stable_count >= 3) {
+        last_temp_band = band;
+        band_stable_count = 0;
+        return band;
+    }
+
+    // ignore transient fluctuation → stay in old band
+    return last_temp_band;
+}
+
 /* ---------------- EC init ---------------- */
 
 static int ec_init(void) {
@@ -193,15 +222,13 @@ static int auto_fan(void) {
         target = 100;
     }
 
-int band = temp_band(temp);
+int band = stable_temp_band(temp);
 
 if (band != last_temp_band) {
     int current = state.auto_duty_val;
 
     printf("TEMP BAND CHANGE: %d°C → band %d | TARGET=%d%% | FAN=%d%%\n",
            temp, band, target, current);
-
-    last_temp_band = band;
 }
 
     // smooth changes to avoid oscillation/noise spikes
