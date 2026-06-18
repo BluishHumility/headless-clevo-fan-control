@@ -14,5 +14,5 @@ target_link_libraries(clevo-fan-control m)
 install(TARGETS clevo-fan-control
         RUNTIME DESTINATION bin)
 
-install(FILES ${CMAKE_SOURCE_DIR}/clevo-fan-control.service
+install(FILES ${CMAKE_SOURCE_DIR}/systemd/clevo-fan-control.service
         DESTINATION /etc/systemd/system)
