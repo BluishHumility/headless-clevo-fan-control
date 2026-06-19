@@ -130,33 +130,33 @@ static int auto_fan(void)
     switch (duty) {
 
     case 10:
-        if (temp >= 55)
+        if (temp >= 50)
             duty = 15;
         break;
 
     case 15:
-        if (temp >= 65)
+        if (temp >= 60)
             duty = 25;
         else if (temp <= 45)
             duty = 10;
         break;
 
     case 25:
-        if (temp >= 75)
+        if (temp >= 70)
             duty = 40;
         else if (temp <= 55)
             duty = 15;
         break;
 
     case 40:
-        if (temp >= 85)
+        if (temp >= 80)
             duty = 60;
         else if (temp <= 65)
             duty = 25;
         break;
 
     case 60:
-        if (temp >= 95)
+        if (temp >= 90)
             duty = 80;
         else if (temp <= 75)
             duty = 40;
@@ -178,20 +178,6 @@ static int auto_fan(void)
     return duty;
 }
 
-/* ---------- temperature bands for logging ---------- */
-
-static int temp_band(int temp)
-{
-    if (temp < 55)  return 0;
-    if (temp < 65)  return 1;
-    if (temp < 75)  return 2;
-    if (temp < 85)  return 3;
-    if (temp < 95)  return 4;
-    if (temp < 100) return 5;
-
-    return 6;
-}
-
 /* ---------- info ---------- */
 
 static void print_info(void)
@@ -208,7 +194,6 @@ static void print_info(void)
 
 static void daemon_loop(void)
 {
-    int last_band = -1;
     int last_duty = -1;
 
     printf("Starting fan daemon\n");
@@ -220,12 +205,10 @@ static void daemon_loop(void)
 
         int temp = MAX(state.cpu_temp, state.gpu_temp);
         int duty = auto_fan();
-        int band = temp_band(temp);
 
-        if (duty != last_duty)
+        if (duty != last_duty) {
+
             ec_set_fan(duty);
-
-        if (band != last_band) {
 
             printf(
                 "TEMP=%d°C CPU=%d°C GPU=%d°C FAN=%d%% RPM=%d\n",
@@ -237,10 +220,8 @@ static void daemon_loop(void)
 
             fflush(stdout);
 
-            last_band = band;
+            last_duty = duty;
         }
-
-        last_duty = duty;
 
         sleep(1);
     }
