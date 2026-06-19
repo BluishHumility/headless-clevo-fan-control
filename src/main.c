@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 
-#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +12,6 @@
 /* EC ports */
 #define EC_SC   0x66
 #define EC_DATA 0x62
-
 #define EC_SC_READ_CMD 0x80
 
 /* EC registers */
@@ -81,9 +79,7 @@ static int ec_set_fan(int duty)
     if (duty < 0 || duty > 100)
         return -1;
 
-    int val = duty * 255 / 100;
-
-    return ec_write_cmd(0x99, 0x01, (uint8_t)val);
+    return ec_write_cmd(0x99, 0x01, (uint8_t)(duty * 255 / 100));
 }
 
 static int calc_duty(int raw)
@@ -182,6 +178,20 @@ static int auto_fan(void)
     return duty;
 }
 
+/* ---------- temperature bands for logging ---------- */
+
+static int temp_band(int temp)
+{
+    if (temp < 55)  return 0;
+    if (temp < 65)  return 1;
+    if (temp < 75)  return 2;
+    if (temp < 85)  return 3;
+    if (temp < 95)  return 4;
+    if (temp < 100) return 5;
+
+    return 6;
+}
+
 /* ---------- info ---------- */
 
 static void print_info(void)
@@ -198,6 +208,7 @@ static void print_info(void)
 
 static void daemon_loop(void)
 {
+    int last_band = -1;
     int last_duty = -1;
 
     printf("Starting fan daemon\n");
@@ -207,22 +218,29 @@ static void daemon_loop(void)
 
         ec_read_state();
 
+        int temp = MAX(state.cpu_temp, state.gpu_temp);
         int duty = auto_fan();
+        int band = temp_band(temp);
 
-        if (duty != last_duty) {
-
+        if (duty != last_duty)
             ec_set_fan(duty);
 
-            printf("CPU=%d°C GPU=%d°C FAN=%d%% RPM=%d\n",
-                   state.cpu_temp,
-                   state.gpu_temp,
-                   duty,
-                   state.fan_rpms);
+        if (band != last_band) {
+
+            printf(
+                "TEMP=%d°C CPU=%d°C GPU=%d°C FAN=%d%% RPM=%d\n",
+                temp,
+                state.cpu_temp,
+                state.gpu_temp,
+                duty,
+                state.fan_rpms);
 
             fflush(stdout);
 
-            last_duty = duty;
+            last_band = band;
         }
+
+        last_duty = duty;
 
         sleep(1);
     }
@@ -245,7 +263,7 @@ int main(int argc, char **argv)
         int duty = atoi(argv[1]);
 
         if (duty < 0 || duty > 100) {
-            fprintf(stderr, "Invalid duty\n");
+            fprintf(stderr, "Invalid duty (0-100)\n");
             return EXIT_FAILURE;
         }
 
