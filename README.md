@@ -11,7 +11,6 @@ By default the service will be installed to `/usr/local/bin` and the
 service file for autostart to `/etc/systemd/system/clevo-fan-control.service`.
 
 ```shell
-cmake -DUSER=<user> -DGROUP=<user group> -DHOME=<home directory path> <path/to/clevo-fan-control>
 cmake --build .
 sudo cmake --install .
 systemctl enable --now clevo-fan-control
